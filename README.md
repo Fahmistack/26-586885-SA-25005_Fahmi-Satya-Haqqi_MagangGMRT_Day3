@@ -4,8 +4,8 @@
 
 | | |
 |---|---|
-| **Nama Lengkap** | `Fahmi Satya Haqqi` |
-| **NIM** | `26/586885/SA/25005` |
+| **Nama Lengkap** | Fahmi Satya Haqqi |
+| **NIM** | 26/586885/SA/25005 |
 
 ## 2. Description
 
@@ -13,12 +13,13 @@ Sistem ini mengendalikan **5 servo motor** pada robot berdasarkan data kemiringa
 
 - **Mikrokontroler:** ESP32
 - **Sensor:**
-  - **MPU6050** (IMU 6-axis: akselerometer + gyro) untuk membaca roll, pitch, dan yaw. Sensor ini dipakai sebagai pengganti BNO055 karena BNO055 tidak tersedia di Wokwi.
+  - **MPU6050** (IMU 6-axis: akselerometer + gyro) untuk membaca roll, pitch, dan yaw. Dipakai sebagai pengganti BNO055 karena BNO055 tidak tersedia di Wokwi.
   - **PIR (Passive Infrared)** untuk mendeteksi gerakan eksternal.
 - **Aktuator:** 5 servo motor (Servo 1 sampai Servo 5).
 - **Protokol komunikasi:**
   - **I2C** untuk membaca data IMU (SDA = GPIO 21, SCL = GPIO 22).
   - **PWM 50 Hz** (periode 20 ms) untuk mengontrol servo: −90° = 1000 µs, 0° = 1500 µs, +90° = 2000 µs.
+- **Pewaktuan:** seluruh jeda memakai **state machine berbasis `millis()`**, tanpa `delay()` di dalam `loop()`. Pembacaan sensor dan respons Roll/Pitch tidak terblokir saat Servo 5 menunggu 1 detik.
 
 **Pin yang digunakan**
 
@@ -34,6 +35,31 @@ Sistem ini mengendalikan **5 servo motor** pada robot berdasarkan data kemiringa
 
 Servo 1-2 dan Servo 3-4 dipasang berdekatan, dan tidak ada servo yang memakai jalur I2C.
 
+**State machine**
+
+| State | Fungsi | Transisi |
+|---|---|---|
+| `YAW_FOLLOW` | Servo 5 mengikuti yaw | Ke `YAW_HOLD` saat yaw berhenti (kecepatan < 3°/s selama 200 ms) |
+| `YAW_HOLD` | Servo 5 diam, masukan yaw diabaikan | Ke `YAW_RETURN` setelah 1000 ms |
+| `YAW_RETURN` | Servo 5 kembali ke 0° | Ke `YAW_FOLLOW` setelah 400 ms |
+| `EXT_IDLE` | Operasi normal | Ke `EXT_GO` saat PIR terpicu |
+| `EXT_GO` | Semua servo ke +45°, ditahan 1,5 detik | Ke `EXT_RETURN` |
+| `EXT_RETURN` | Semua servo kembali ke 0° | Ke `EXT_IDLE` setelah 1000 ms |
+
+Penjelasan lengkap ada di komentar awal `robot_imu_servo.ino`.
+
+**Asumsi**
+
+- Saat start, sensor diam dan datar (roll = pitch = yaw = 0). Posisi awal servo 0°.
+- Yaw dihitung dari integrasi gyro Z karena MPU6050 tidak punya magnetometer.
+- Posisi target gerakan eksternal (PIR) adalah +45° untuk semua servo.
+
+**Diagram**
+
+![Diagram blok](diagram_blok.jpg)
+
+![Flowchart](flowchart.jpg)
+
 ## 3. Feature Table
 
 | Fitur | Input (Sensor) | Output (Aktuator) | Perilaku |
@@ -47,9 +73,9 @@ Ketentuan umum: posisi awal 0°, rentang rotasi dan rentang servo ±90°.
 
 ## 4. How to Run
 
-**Link Wokwi:** `https://wokwi.com/projects/480636265081807873`
+**Link Wokwi:** https://wokwi.com/projects/480636265081807873
 
-**Library yang dibutuhkan**
+**Library yang dibutuhkan** (isi tab `libraries.txt` di Wokwi)
 
 ```
 ESP32Servo
@@ -61,18 +87,25 @@ Adafruit BusIO
 **Langkah menjalankan simulasi**
 
 1. Buka link Wokwi di atas, atau buat proyek **ESP32** baru lalu salin isi `robot_imu_servo.ino` ke `sketch.ino`, `diagram.json` ke `diagram.json`, dan `libraries.txt` ke `libraries.txt`.
-2. Pastikan baris `#define IMU_SERIAL 0` bernilai 0 (memakai sensor MPU6050).
+2. Pastikan semua slider MPU6050 di nilai awal: Acceleration X = 0, Y = 0, Z = 1 g, dan Rotation X, Y, Z = 0°/sec.
 3. Klik tombol hijau **Start**.
-4. Tunggu 1-2 detik sampai kalibrasi gyro selesai. Serial Monitor menampilkan `Siap.`. Jangan ubah slider MPU6050 selama kalibrasi.
+4. Tunggu sampai Serial Monitor menampilkan `Siap.`. Jangan ubah slider MPU6050 selama kalibrasi gyro (sekitar 1 detik).
 
 **Cara memicu input uji**
 
 | Pengujian | Cara memicu | Hasil yang diharapkan |
 |---|---|---|
-| **Kasus Uji 1: Roll +30°, Pitch −20°** | Ketik `t` di Serial Monitor lalu Enter. Atau klik MPU6050 dan setel akselerometer ke X ≈ 0,342 g, Y ≈ 0,470 g, Z ≈ 0,814 g. | Servo 1 dan 2 = **1333 µs**, Servo 3 dan 4 = **1389 µs** |
-| **Kasus Uji 2: Yaw berhenti** | Klik MPU6050, setel gyro Z ke nilai bukan nol (misalnya 30°/s) selama 1-2 detik, lalu kembalikan ke 0. | Servo 5 berhenti, diam 1 detik, lalu kembali ke 0° (1500 µs). Serial Monitor mencetak `Yaw berhenti: tunda 1 detik` dan `Servo 5 kembali ke 0 deg`. |
+| **Kasus Uji 1: Roll +30°, Pitch −20°** | Ketik `t` di Serial Monitor lalu Enter. Atau klik MPU6050 lalu geser Acceleration Y ke 0,55 g dan X ke 0,40 g (Z tetap 1 g). | Blok `KASUS UJI 1` tercetak. Dengan `t`: Servo 1 dan 2 = **1333 µs**, Servo 3 dan 4 = **1389 µs**. Dengan slider nilainya mendekati (±2°). |
+| **Kasus Uji 2: Yaw berhenti** | Klik MPU6050, geser Rotation Z ke sekitar 50°/sec selama 1-2 detik, lalu kembalikan ke 0. Atau ketik `y45` lalu Enter. | Servo 5 berhenti, diam 1 detik, lalu kembali ke 0° (1500 µs). Dua baris `KASUS UJI 2` tercetak dengan selisih waktu 1000 ms. |
 | **Gerakan Eksternal (PIR)** | Klik sensor PIR saat simulasi berjalan, lalu pilih **Simulate Motion**. | Semua servo serentak ke +45° (1750 µs), bertahan 1,5 detik, lalu kembali ke 0°. |
 
-**Mode tanpa sensor (opsional):** ubah `#define IMU_SERIAL 1`, lalu beri sudut manual lewat Serial Monitor: `r30` (roll), `p-20` (pitch), `y45` (yaw), `t` (Kasus Uji 1), `z` (nol-kan roll dan pitch), `m` (picu PIR).
+**Perintah Serial Monitor** (selalu aktif, diakhiri Enter)
 
-Kalau arah roll, pitch, atau yaw terbalik, ubah `SIGN_ROLL`, `SIGN_PITCH`, atau `SIGN_YAW` menjadi `-1.0f`.
+| Perintah | Fungsi |
+|---|---|
+| `t` | Paksa roll +30° dan pitch −20° (Kasus Uji 1) |
+| `r<n>` / `p<n>` / `y<n>` | Paksa roll / pitch / yaw ke n derajat (contoh `r30`, `p-20`, `y45`) |
+| `m` | Simulasikan pemicu PIR |
+| `z` | Hapus semua paksaan dan kembali membaca sensor MPU6050 |
+
+Setelah memakai `t`, `r`, `p`, atau `y`, ketik `z` agar slider sensor kembali mengendalikan servo.
